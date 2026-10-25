@@ -692,6 +692,15 @@
       if (DATA.hoje_2026_nacional) {
         document.getElementById('last-updated-text').textContent = 'Boletim TSE: ' + (DATA.hoje_2026_nacional.timestamp || '25/10/2026');
       }
+
+      // Se servido por HTTP/HTTPS (GitHub Pages ou servidor local), ativa auto-atualização por padrão
+      if (window.location.protocol.startsWith('http')) {
+        const chk = document.getElementById('chk-auto-refresh');
+        if (chk) chk.checked = true;
+        toggleAutoRefresh(true);
+        // Busca imediata ao vivo do TSE no primeiro carregamento
+        setTimeout(atualizarDadosAoVivo, 500);
+      }
     }
 
     function setCargoMode(mode) {
@@ -1419,8 +1428,181 @@
     }
 
     // ==========================================
-    // REFRESH & LIVE UPDATES
+    // REFRESH & LIVE UPDATES (DIRETO DO TSE NO NAVEGADOR & GITHUB PAGES)
     // ==========================================
+    function parseNum(val, def = 0) {
+      if (val === undefined || val === null) return def;
+      const s = String(val).split('.').join('').replace(',', '.').trim();
+      const n = parseInt(s, 10);
+      return isNaN(n) ? def : n;
+    }
+
+    function parseFloatBR(val, def = 0.0) {
+      if (val === undefined || val === null) return def;
+      const s = String(val).split('.').join('').replace(',', '.').trim();
+      const f = parseFloat(s);
+      return isNaN(f) ? def : f;
+    }
+
+    // Coleta diretamente da API oficial do TSE pelo navegador (com suporte total a CORS em GitHub Pages)
+    async function coletarTSEClientSide() {
+      const ts = Date.now();
+      const ufs = ['ac', 'al', 'am', 'ap', 'ba', 'ce', 'df', 'es', 'go', 'ma', 'mg', 'ms', 'mt', 'pa', 'pb', 'pe', 'pi', 'pr', 'rj', 'rn', 'ro', 'rr', 'rs', 'sc', 'se', 'sp', 'to'];
+      const baseTse = 'https://resultados.tse.jus.br/oficial/ele2026/6258/dados';
+
+      // 1. Totalização Nacional (BR)
+      const rBr = await fetch(`${baseTse}/br/br-c0001-e006258-u.json?_t=${ts}`, { cache: 'no-store' });
+      if (!rBr.ok) throw new Error('Falha ao consultar TSE BR: ' + rBr.status);
+      const brJson = await rBr.json();
+
+      const secoesBr = brJson.s || {};
+      const apuradoPctBr = parseFloatBR(secoesBr.pst, 0);
+      const cargBr = (brJson.carg && brJson.carg[0]) || {};
+
+      let bolsoBr = { votos: 0, pct: 0, nome: 'FLAVIO NANTES BOLSONARO' };
+      let lulaBr = { votos: 0, pct: 0, nome: 'LUIZ INÁCIO LULA DA SILVA' };
+
+      (cargBr.agr || []).forEach(a => {
+        (a.par || []).forEach(p => {
+          (p.cand || []).forEach(c => {
+            const num = c.n;
+            const item = {
+              numero: num,
+              nome: c.nm,
+              partido: p.sg,
+              votos: parseNum(c.vap),
+              pct: parseFloatBR(c.pvap)
+            };
+            if (num === '22') bolsoBr = item;
+            if (num === '13') lulaBr = item;
+          });
+        });
+      });
+
+      const vInfo = brJson.v || {};
+      const eInfo = brJson.e || {};
+
+      let vencedorNac = 'Aguardando';
+      if (bolsoBr.votos > lulaBr.votos) vencedorNac = 'Bolsonaro';
+      else if (lulaBr.votos > bolsoBr.votos) vencedorNac = 'Lula';
+      else vencedorNac = apuradoPctBr === 0 ? 'Aguardando' : 'Empate';
+
+      const nacHoje = {
+        timestamp: `${brJson.dg || ''} ${brJson.hg || ''}`.trim(),
+        turno: 2,
+        pleito_data: '25/10/2026',
+        descricao: '2º Turno Presidencial (25/10/2026)',
+        apurado_pct: apuradoPctBr,
+        secoes_total: parseNum(secoesBr.ts),
+        secoes_apuradas: parseNum(secoesBr.st),
+        lula_votos: lulaBr.votos,
+        lula_pct: lulaBr.pct,
+        lula_nome: lulaBr.nome,
+        bolsonaro_votos: bolsoBr.votos,
+        bolsonaro_pct: bolsoBr.pct,
+        bolsonaro_nome: bolsoBr.nome,
+        outros_candidatos: [],
+        votos_validos: parseNum(vInfo.vv),
+        brancos_votos: parseNum(vInfo.vb),
+        brancos_pct: parseFloatBR(vInfo.pvb),
+        nulos_votos: parseNum(vInfo.tvn),
+        nulos_pct: parseFloatBR(vInfo.ptvn),
+        abstencao_votos: parseNum(eInfo.a),
+        abstencao_pct: parseFloatBR(eInfo.pa),
+        eleitorado_total: parseNum(eInfo.te),
+        vencedor: vencedorNac,
+        estados_lula: 0,
+        estados_bolsonaro: 0
+      };
+
+      // 2. Consulta concorrente dos 27 estados
+      const ufReqs = ufs.map(async u => {
+        try {
+          const r = await fetch(`${baseTse}/${u}/${u}-c0001-e006258-u.json?_t=${ts}`, { cache: 'no-store' });
+          if (!r.ok) return null;
+          const j = await r.json();
+          return { uf: u.toUpperCase(), json: j };
+        } catch (e) {
+          return null;
+        }
+      });
+
+      const ufResults = await Promise.all(ufReqs);
+
+      ufResults.forEach(res => {
+        if (!res || !res.json) return;
+        const uf = res.uf;
+        const uJson = res.json;
+        const cargUf = (uJson.carg && uJson.carg[0]) || {};
+
+        let bUf = { votos: 0, pct: 0, nome: 'FLAVIO NANTES BOLSONARO' };
+        let lUf = { votos: 0, pct: 0, nome: 'LUIZ INÁCIO LULA DA SILVA' };
+
+        (cargUf.agr || []).forEach(a => {
+          (a.par || []).forEach(p => {
+            (p.cand || []).forEach(c => {
+              const num = c.n;
+              const item = {
+                nome: c.nm,
+                partido: p.sg,
+                votos: parseNum(c.vap),
+                pct: parseFloatBR(c.pvap)
+              };
+              if (num === '22') bUf = item;
+              if (num === '13') lUf = item;
+            });
+          });
+        });
+
+        const vUf = uJson.v || {};
+        const eUf = uJson.e || {};
+        const sUf = uJson.s || {};
+        const apurUf = parseFloatBR(sUf.pst);
+
+        let vencedorUf = 'Aguardando';
+        if (bUf.votos > lUf.votos) {
+          vencedorUf = 'Bolsonaro';
+          nacHoje.estados_bolsonaro++;
+        } else if (lUf.votos > bUf.votos) {
+          vencedorUf = 'Lula';
+          nacHoje.estados_lula++;
+        }
+
+        const margemPct = Math.round(Math.abs(lUf.pct - bUf.pct) * 100) / 100;
+        const margemVotos = Math.abs(lUf.votos - bUf.votos);
+
+        if (DATA.estados && DATA.estados[uf]) {
+          DATA.estados[uf].hoje_2026 = {
+            timestamp: `${uJson.dg || ''} ${uJson.hg || ''}`.trim(),
+            secoes_total: parseNum(sUf.ts),
+            secoes_apuradas: parseNum(sUf.st),
+            apurado_pct: apurUf,
+            eleitorado: parseNum(eUf.te),
+            abstencao: parseNum(eUf.a),
+            abstencao_pct: parseFloatBR(eUf.pa),
+            lula_votos: lUf.votos,
+            lula_pct: lUf.pct,
+            lula_nome: lUf.nome,
+            bolsonaro_votos: bUf.votos,
+            bolsonaro_pct: bUf.pct,
+            bolsonaro_nome: bUf.nome,
+            vencedor: vencedorUf,
+            margem_pct: margemPct,
+            margem_votos: margemVotos,
+            brancos_votos: parseNum(vUf.vb),
+            brancos_pct: parseFloatBR(vUf.pvb),
+            nulos_votos: parseNum(vUf.tvn),
+            nulos_pct: parseFloatBR(vUf.ptvn),
+            votos_validos: parseNum(vUf.vv),
+            outros: []
+          };
+        }
+      });
+
+      DATA.hoje_2026_nacional = nacHoje;
+      return DATA;
+    }
+
     async function atualizarDadosAoVivo() {
       const btn = document.getElementById('btn-refresh');
       const label = document.getElementById('refresh-label');
@@ -1429,33 +1611,36 @@
       icon.classList.add('animate-spin');
 
       try {
+        // 1. Tentar coletar direto da API oficial do TSE no navegador (suporta GitHub Pages via CORS!)
+        try {
+          await coletarTSEClientSide();
+          document.getElementById('last-updated-text').textContent = 'Boletim TSE: ' + (DATA.hoje_2026_nacional.timestamp || 'Hoje');
+          renderPresView();
+          label.textContent = 'Atualizado!';
+          return;
+        } catch (errDirect) {
+          console.warn('Consulta direta ao TSE falhou ou bloqueada no protocolo file://, tentando fallback local...', errDirect);
+        }
+
+        // 2. Se falhar (ex: file:// sem permissão de rede), tenta servidor local Python
         const resp = await fetch('/api/atualizar?_t=' + Date.now(), { cache: 'no-store' });
         if (resp.ok) {
           DATA = await resp.json();
-          init();
+          document.getElementById('last-updated-text').textContent = 'Boletim TSE: ' + (DATA.hoje_2026_nacional.timestamp || 'Hoje');
+          renderPresView();
           label.textContent = 'Atualizado!';
         } else {
+          // 3. Fallback para arquivo JSON estático se disponível
           const rJson = await fetch('election_data.json?_t=' + Date.now(), { cache: 'no-store' });
           if (rJson.ok) {
             DATA = await rJson.json();
-            init();
+            document.getElementById('last-updated-text').textContent = 'Boletim TSE: ' + (DATA.hoje_2026_nacional.timestamp || 'Hoje');
+            renderPresView();
             label.textContent = 'Atualizado!';
-          } else {
-            window.location.reload();
           }
         }
       } catch (e) {
-        console.warn('Erro ao atualizar via API local:', e);
-        if (window.location.protocol === 'file:') {
-          alert('Você está abrindo o arquivo diretamente via file://.
-
-Para atualizar os dados ao vivo:
-1) Execute "python server.py" e abra http://localhost:8000/index.html
-OU
-2) Execute "python atualizar_dados.py" no terminal.');
-        } else {
-          window.location.reload();
-        }
+        console.warn('Erro ao atualizar dados:', e);
       } finally {
         setTimeout(() => {
           label.textContent = 'Atualizar Agora';
@@ -1471,7 +1656,6 @@ OU
       }
       if (enable) {
         autoRefreshTimer = setInterval(atualizarDadosAoVivo, 60000);
-        atualizarDadosAoVivo();
       }
     }
 
