@@ -866,10 +866,7 @@
       const vbPct = nac.brancos_pct !== undefined ? nac.brancos_pct.toFixed(2).replace('.', ',') + '%' : '';
       const vnPct = nac.nulos_pct !== undefined ? nac.nulos_pct.toFixed(2).replace('.', ',') + '%' : '';
 
-      document.getElementById('pres-stat-brancos').textContent = `${vb.toLocaleString('pt-BR')} ${vbPct ? '(' + vbPct + ')' : ''}`;
-      document.getElementById('pres-stat-nulos').textContent = `${vn.toLocaleString('pt-BR')} ${vnPct ? '(' + vnPct + ')' : ''}`;
-      document.getElementById('pres-stat-abstencao').textContent = absPct.toFixed(2).replace('.', ',') + '%';
-      document.getElementById('pres-stat-eleitorado').textContent = totEleit.toLocaleString('pt-BR');
+// Totais atualizados via c4Content
 
       // Se 1º turno com outros candidatos, mostrar na caixinha
       const c4Content = document.getElementById('pres-card4-content');
@@ -1660,33 +1657,52 @@
     }
 
     function downloadCSV() {
-      let csv = '';
+      const lines = [];
       if (currentMode === 'presidente') {
-        csv = 'UF;Estado;Regiao;Apurado_Pct;Lider;Bolsonaro_Votos;Bolsonaro_Pct;Lula_Votos;Lula_Pct;Margem_Pct;Abstencao_Pct
-';
+        lines.push('UF;Estado;Regiao;Apurado_Pct;Lider;Bolsonaro_Votos;Bolsonaro_Pct;Lula_Votos;Lula_Pct;Margem_Pct;Abstencao_Pct');
         Object.values(DATA.estados).forEach(st => {
           const td = getPresDataUF(st);
-          csv += `${st.uf};${st.nome};${st.regiao};${td.apurado_pct || 0};${td.vencedor || '-'};${td.bolsonaro_votos || 0};${td.bolsonaro_pct || 0};${td.lula_votos || 0};${td.lula_pct || 0};${td.margem_pct || 0};${td.abstencao_pct || 0}
-`;
+          lines.push([
+            st.uf,
+            st.nome,
+            st.regiao,
+            td.apurado_pct || 0,
+            td.vencedor || '-',
+            td.bolsonaro_votos || 0,
+            td.bolsonaro_pct || 0,
+            td.lula_votos || 0,
+            td.lula_pct || 0,
+            td.margem_pct || 0,
+            td.abstencao_pct || 0
+          ].join(';'));
         });
       } else {
-        csv = 'UF;Estado;Regiao;Senador_1_Nome;Senador_1_Partido;Senador_1_Votos;Senador_2_Nome;Senador_2_Partido;Senador_2_Votos
-';
+        lines.push('UF;Estado;Regiao;Senador_1_Nome;Senador_1_Partido;Senador_1_Votos;Senador_2_Nome;Senador_2_Partido;Senador_2_Votos');
         Object.values(DATA.estados).forEach(st => {
-          const sen = DATA.senado_2026.por_uf[st.uf];
+          const sen = (DATA.senado_2026 && DATA.senado_2026.por_uf) ? DATA.senado_2026.por_uf[st.uf] : null;
           if (sen) {
             const e1 = sen.eleitos[0];
             const e2 = sen.eleitos[1];
-            csv += `${st.uf};${st.nome};${st.regiao};${e1.nome};${e1.partido};${e1.votos};${e2.nome};${e2.partido};${e2.votos}
-`;
+            lines.push([
+              st.uf,
+              st.nome,
+              st.regiao,
+              e1.nome,
+              e1.partido,
+              e1.votos,
+              e2.nome,
+              e2.partido,
+              e2.votos
+            ].join(';'));
           }
         });
       }
+      const csv = lines.join(String.fromCharCode(10));
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `tse_eleicoes_2026_${currentMode}.csv`;
+      a.download = 'tse_eleicoes_2026_' + currentMode + '.csv';
       a.click();
       URL.revokeObjectURL(url);
     }

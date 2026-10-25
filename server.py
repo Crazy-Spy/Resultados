@@ -23,14 +23,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=DIRECTORY, **kwargs)
 
     def end_headers(self):
-        # Desabilitar cache para arquivos dinâmicos e habilitar CORS
+        # Desabilitar cache para todos os arquivos e habilitar CORS
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', '*')
-        if self.path.endswith('.json') or '/api/' in self.path:
-            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
-            self.send_header('Pragma', 'no-cache')
-            self.send_header('Expires', '0')
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -57,8 +56,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def log_message(self, format, *args):
-        if '/api/atualizar' not in args[0] and '.geojson' not in args[0]:
-            print(f"[{self.log_date_time_string()}] {args[0]}")
+        msg = str(args[0]) if args else ''
+        if '/api/atualizar' not in msg and '.geojson' not in msg:
+            print(f"[{self.log_date_time_string()}] {msg}")
 
 def background_updater():
     """Atualiza automaticamente em segundo plano a cada 60 segundos."""
