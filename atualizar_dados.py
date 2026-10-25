@@ -232,14 +232,18 @@ def coletar_dados_tse():
 
     # 5. Reconstruir index.html e chat artifact
     try:
-        from build_html import rebuild_html
-        rebuild_html(database)
+        import importlib
+        import build_html
+        importlib.reload(build_html)
+        build_html.rebuild_html(database)
     except Exception as e:
         print(f"  [AVISO] Nao foi possivel reconstruir index.html: {e}")
 
     try:
-        from build_artifact import rebuild_artifact
-        rebuild_artifact(database)
+        import importlib
+        import build_artifact
+        importlib.reload(build_artifact)
+        build_artifact.rebuild_artifact(database)
     except Exception as e:
         print(f"  [AVISO] Nao foi possivel reconstruir chat artifact: {e}")
 

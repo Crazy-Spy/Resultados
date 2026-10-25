@@ -283,6 +283,26 @@ def rebuild_html(data=None):
 
       </section>
 
+      <!-- REGIONAL OVERVIEW SECTION -->
+      <section class="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h3 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+              🗺️ Apuração e Desempenho por Macrorregiões
+              <span class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">5 Regiões</span>
+            </h3>
+            <p class="text-xs text-slate-400">Progresso da apuração e divisão de votos nominais em cada macrorregião brasileira</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="filterPresRegion('ALL')" id="btn-reg-all" class="text-xs px-3.5 py-1.5 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5">
+              <span>Mostrar Todas</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3.5" id="pres-regions-grid"></div>
+      </section>
+
       <!-- Presidential Map and Details -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
@@ -901,9 +921,175 @@ def rebuild_html(data=None):
         `;
       }}
 
+      renderRegionCards();
       renderPresMap();
       resetPresSelection();
       renderPresTable('');
+    }}
+
+    function computeRegionStats() {{
+      const regioesList = ['Norte', 'Nordeste', 'Centro-Oeste', 'Sudeste', 'Sul'];
+      const stats = {{}};
+      regioesList.forEach(r => {{
+        stats[r] = {{
+          nome: r,
+          ufs: [],
+          secoes_total: 0,
+          secoes_apuradas: 0,
+          bolsonaro_votos: 0,
+          lula_votos: 0,
+          votos_validos: 0,
+          brancos_votos: 0,
+          nulos_votos: 0,
+          abstencao: 0,
+          eleitorado: 0,
+          estados_bolsonaro: 0,
+          estados_lula: 0
+        }};
+      }});
+
+      Object.values(DATA.estados).forEach(st => {{
+        const r = st.regiao;
+        if (!stats[r]) return;
+        const td = getPresDataUF(st);
+        stats[r].ufs.push(st.uf);
+        stats[r].secoes_total += (td.secoes_total || 0);
+        stats[r].secoes_apuradas += (td.secoes_apuradas || 0);
+        stats[r].bolsonaro_votos += (td.bolsonaro_votos || 0);
+        stats[r].lula_votos += (td.lula_votos || 0);
+        stats[r].votos_validos += (td.votos_validos || (td.bolsonaro_votos || 0) + (td.lula_votos || 0));
+        stats[r].brancos_votos += (td.brancos_votos || 0);
+        stats[r].nulos_votos += (td.nulos_votos || 0);
+        stats[r].abstencao += (td.abstencao || 0);
+        stats[r].eleitorado += (td.eleitorado || 0);
+
+        const bV = td.bolsonaro_votos || 0;
+        const lV = td.lula_votos || 0;
+        if (bV > lV || td.vencedor === 'Bolsonaro') stats[r].estados_bolsonaro++;
+        else if (lV > bV || td.vencedor === 'Lula') stats[r].estados_lula++;
+      }});
+
+      regioesList.forEach(r => {{
+        const s = stats[r];
+        s.apurado_pct = s.secoes_total > 0 ? (s.secoes_apuradas / s.secoes_total) * 100 : 0;
+        const totCand = s.bolsonaro_votos + s.lula_votos;
+        s.bolsonaro_pct = totCand > 0 ? (s.bolsonaro_votos / totCand) * 100 : 0;
+        s.lula_pct = totCand > 0 ? (s.lula_votos / totCand) * 100 : 0;
+        s.margem_pct = Math.abs(s.bolsonaro_pct - s.lula_pct);
+        s.margem_votos = Math.abs(s.bolsonaro_votos - s.lula_votos);
+        if (s.bolsonaro_votos > s.lula_votos) s.vencedor = 'Bolsonaro';
+        else if (s.lula_votos > s.bolsonaro_votos) s.vencedor = 'Lula';
+        else s.vencedor = s.apurado_pct === 0 ? 'Aguardando' : 'Empate';
+      }});
+
+      return stats;
+    }}
+
+    function renderRegionCards() {{
+      const grid = document.getElementById('pres-regions-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      const stats = computeRegionStats();
+      const regioesList = ['Norte', 'Nordeste', 'Centro-Oeste', 'Sudeste', 'Sul'];
+
+      // Atualizar options do dropdown
+      const sel = document.getElementById('pres-region-filter');
+      if (sel) {{
+        const nac = getPresDataNac();
+        const nacApur = (nac.apurado_pct || 0).toFixed(1).replace('.', ',');
+        sel.innerHTML = `<option value="ALL">Todas as Regiões (${{nacApur}}% apurado)</option>` +
+          regioesList.map(r => {{
+            const s = stats[r];
+            const ap = s.apurado_pct.toFixed(1).replace('.', ',');
+            const selAttr = currentPresRegion === r ? 'selected' : '';
+            return `<option value="${{r}}" ${{selAttr}}>${{r}} (${{ap}}% apurado)</option>`;
+          }}).join('');
+      }}
+
+      const btnAll = document.getElementById('btn-reg-all');
+      if (btnAll) {{
+        if (currentPresRegion === 'ALL') {{
+          btnAll.className = 'text-xs px-3.5 py-1.5 rounded-xl font-bold bg-blue-600 text-white shadow transition flex items-center gap-1.5';
+        }} else {{
+          btnAll.className = 'text-xs px-3.5 py-1.5 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5';
+        }}
+      }}
+
+      regioesList.forEach(rName => {{
+        const s = stats[rName];
+        const isSelected = currentPresRegion === rName;
+        const isBolso = s.vencedor === 'Bolsonaro';
+        const isLula = s.vencedor === 'Lula';
+        const apurText = s.apurado_pct.toFixed(2).replace('.', ',') + '%';
+
+        let badgeLider = '<span class="text-[10px] text-slate-500 font-mono">Aguardando</span>';
+        if (s.bolsonaro_votos > 0 || s.lula_votos > 0) {{
+          if (isBolso) {{
+            badgeLider = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400">Bolsonaro +${{s.margem_pct.toFixed(1).replace('.', ',')}}%</span>`;
+          }} else if (isLula) {{
+            badgeLider = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400">Lula +${{s.margem_pct.toFixed(1).replace('.', ',')}}%</span>`;
+          }}
+        }}
+
+        const card = document.createElement('div');
+        card.className = `bg-slate-800/60 hover:bg-slate-800/95 border ${{isSelected ? 'border-amber-400 ring-2 ring-amber-400/30 bg-slate-800' : 'border-slate-700/60'}} rounded-2xl p-3.5 transition-all cursor-pointer flex flex-col justify-between space-y-3`;
+        card.onclick = () => filterPresRegion(isSelected ? 'ALL' : rName);
+
+        const totVotos = s.bolsonaro_votos + s.lula_votos;
+        const barB = totVotos > 0 ? s.bolsonaro_pct : 50;
+        const barL = totVotos > 0 ? s.lula_pct : 50;
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between gap-1 mb-2">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-sm text-white">${{s.nome}}</span>
+                <span class="text-[10px] text-slate-400 font-mono bg-slate-900/80 px-1.5 py-0.2 rounded border border-slate-700">${{s.ufs.length}} UFs</span>
+              </div>
+              ${{badgeLider}}
+            </div>
+
+            <!-- Apuração Progress -->
+            <div class="space-y-1 mb-3 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
+              <div class="flex justify-between text-[11px] font-mono">
+                <span class="text-slate-400">Apuração:</span>
+                <span class="font-bold text-emerald-400">${{apurText}}</span>
+              </div>
+              <div class="w-full bg-slate-700/50 h-2 rounded-full overflow-hidden">
+                <div class="bg-emerald-500 h-full rounded-full transition-all duration-500" style="width: ${{s.apurado_pct}}%"></div>
+              </div>
+              <div class="text-[10px] text-slate-500 font-mono text-right">
+                ${{s.secoes_apuradas.toLocaleString('pt-BR')}} de ${{s.secoes_total.toLocaleString('pt-BR')}} seções
+              </div>
+            </div>
+
+            <!-- Placar Bolsonaro x Lula -->
+            <div class="space-y-1.5 text-xs">
+              <div class="flex justify-between items-center text-blue-300">
+                <span class="font-bold">Bolsonaro:</span>
+                <span class="font-mono font-bold">${{s.bolsonaro_pct.toFixed(2).replace('.', ',')}}% <span class="text-slate-400 font-normal text-[10px]">(${{s.bolsonaro_votos.toLocaleString('pt-BR')}})</span></span>
+              </div>
+              <div class="flex justify-between items-center text-rose-300">
+                <span class="font-bold">Lula:</span>
+                <span class="font-mono font-bold">${{s.lula_pct.toFixed(2).replace('.', ',')}}% <span class="text-slate-400 font-normal text-[10px]">(${{s.lula_votos.toLocaleString('pt-BR')}})</span></span>
+              </div>
+
+              <!-- Direct split bar -->
+              <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden flex">
+                <div class="bg-blue-500 h-full transition-all duration-300" style="width: ${{barB}}%"></div>
+                <div class="bg-rose-500 h-full transition-all duration-300" style="width: ${{barL}}%"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-slate-700/60 text-[10px] text-slate-400 flex items-center justify-between font-mono">
+            <span>UFs: <strong class="text-blue-400">${{s.estados_bolsonaro}}</strong> x <strong class="text-rose-400">${{s.estados_lula}}</strong></span>
+            <span class="${{isSelected ? 'text-amber-400 font-bold' : 'text-slate-500'}}">${{isSelected ? '✓ Filtrado' : 'Clique p/ filtrar'}}</span>
+          </div>
+        `;
+
+        grid.appendChild(card);
+      }});
     }}
 
     function renderPresMap() {{
@@ -1123,12 +1309,19 @@ def rebuild_html(data=None):
 
     function filterPresRegion(reg) {{
       currentPresRegion = reg;
+      const sel = document.getElementById('pres-region-filter');
+      if (sel) sel.value = reg;
+
       Object.values(DATA.estados).forEach(st => {{
         const p = document.getElementById('pres-path-' + st.uf);
         if (!p) return;
         const isDim = reg !== 'ALL' && st.regiao !== reg;
-        p.setAttribute('opacity', isDim ? '0.25' : '1');
+        p.setAttribute('opacity', isDim ? '0.2' : '1');
       }});
+
+      renderRegionCards();
+      const search = document.getElementById('pres-table-search');
+      renderPresTable(search ? search.value : '');
     }}
 
     function renderPresTable(query) {{
@@ -1139,6 +1332,8 @@ def rebuild_html(data=None):
 
       Object.values(DATA.estados).forEach(st => {{
         const td = getPresDataUF(st);
+        if (currentPresRegion !== 'ALL' && st.regiao !== currentPresRegion) return;
+
         if (q) {{
           const full = (st.uf + ' ' + st.nome + ' ' + st.regiao).toLowerCase();
           if (!full.includes(q)) return;
